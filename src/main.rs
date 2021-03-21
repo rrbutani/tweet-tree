@@ -1,4 +1,5 @@
-use std::convert::Infallible;
+use std::convert::{Infallible, TryInto};
+use std::collections::HashMap;
 use std::env;
 use std::fmt::{self, Display};
 use std::marker::PhantomData;
@@ -8,11 +9,12 @@ use std::str::FromStr;
 
 use chrono::Utc;
 use color_eyre::{eyre::WrapErr, Help, owo_colors::OwoColorize, Result};
-use egg_mode::{auth, tweet, KeyPair};
-use futures::{StreamExt, TryStreamExt};
+use egg_mode::{auth, tweet, user, KeyPair, Token};
+use futures::StreamExt;
 use once_cell::unsync::OnceCell;
+use petgraph::graphmap::DiGraphMap;
+use rand::{Rng, thread_rng};
 use structopt::StructOpt;
-// use tokio_compat_02::FutureExt;
 
 trait EnvVarOrArg {
     const NAME: &'static str;
@@ -118,11 +120,44 @@ struct Args {
     consumer_secret: ArgWithEnvVarDefault<ConsumerSecret>,
 }
 
+#[derive(Debug)]
+struct User {
+    handle: String,
+    name: String,
+    color: (u8, u8, u8),
+}
 
-// async fn main() -> Result<()> {
+impl Display for User {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (r, g, b) = self.color;
+        write!(fmt, "{} (@{})", self.name, self.handle.truecolor(r, g, b))
+    }
+}
 
-//     real_main(Args::from_args()).compat().await
-// }
+impl User {
+    async fn new(id: u64, token: &Token) -> Result<Self> {
+        let user = &user::lookup(Some(user::UserID::ID(id)), token).await?[0];
+
+        let color = if user.profile_background_color != "000000" {
+            let c = &user.profile_background_color;
+            let r = u8::from_str_radix(&c[0..2], 16)?;
+            let g = u8::from_str_radix(&c[2..4], 16)?;
+            let b = u8::from_str_radix(&c[4..6], 16)?;
+            (r, g, b)
+        } else {
+            thread_rng().gen()
+        };
+
+        let user = User {
+            handle: user.screen_name.clone(),
+            name: user.name.clone(),
+            color,
+        };
+
+        eprintln!("{}: {}", "New User".italic().blue(), user);
+        Ok(user)
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -156,19 +191,40 @@ async fn main() -> Result<()> {
         );
     }
 
-    // raw::request_as_cursor_iter(
-    //     "https://api.twitter.com/2/tweets/search/recent",
-    //     &token,
-    //     params,
-    //     None, // this is `max_results` not `count` for the search API
-    // )
+    type TweetId = u64;
+    type UserId = u64;
+
+    let mut users = HashMap::<UserId, (User, usize)>::new();
+    let root_user_id = root.user.as_ref().unwrap().id;
+    users.insert(root_user_id, (User::new(root_user_id, &token).await?, 1));
+
+    let mut tweets = HashMap::<TweetId, UserId>::new();
+    tweets.insert(args.root_tweet_id, root_user_id);
+
+    let mut graph = DiGraphMap::<TweetId, UserId>::new();
+    graph.add_node(args.root_tweet_id);
 
     let mut children = tweet::all_children_raw(args.root_tweet_id, &token).await;
     while let Some(t) = children.next().await {
-        println!("{:?}", t.unwrap().text);
+        let t = t?;
+        let author_id = t.author_id.unwrap();
+
+        let (_, ref mut count) = if let Some(p) = users.get_mut(&author_id) {
+            p
+        } else {
+            users.insert(author_id, (User::new(author_id, &token).await?, 0));
+            users.get_mut(&author_id).unwrap()
+        };
+        *count += 1;
+
+        let t: tweet::Tweet = (*t).clone().try_into()?;
+        tweets.insert(t.id, author_id);
+
+        let prev = t.in_reply_to_status_id.unwrap();
+        graph.add_edge(prev, t.id, author_id);
     }
 
-    // println!("{:#?}", root);
+    eprintln!("{} tweets found! ({} unique users)", graph.node_count(), users.len());
 
     Ok(())
 }

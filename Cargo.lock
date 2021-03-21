@@ -229,7 +229,7 @@ dependencies = [
 [[package]]
 name = "egg-mode"
 version = "0.15.0"
-source = "git+https://github.com/rrbutani/egg-mode#3502c653995e8d8102cb4bf6dd064500740f4425"
+source = "git+https://github.com/rrbutani/egg-mode#d13d323de942cf1cad3cfdc30b4792ed8daf5ba0"
 dependencies = [
  "base64",
  "chrono",
@@ -1362,6 +1362,7 @@ dependencies = [
  "futures",
  "once_cell",
  "petgraph",
+ "rand",
  "serde",
  "structopt",
  "tokio",
