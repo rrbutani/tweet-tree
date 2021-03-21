@@ -166,6 +166,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "convert_case"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
+
+[[package]]
 name = "core-foundation"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -208,10 +214,11 @@ dependencies = [
 
 [[package]]
 name = "derive_more"
-version = "0.99.11"
+version = "0.99.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41cb0e6161ad61ed084a36ba71fbba9e3ac5aee3606fb607fe08da6acbcf3d8c"
+checksum = "f82b1b72f1263f214c0f823371768776c4f5841b942c9883aa8e5ec584fd0ba6"
 dependencies = [
+ "convert_case",
  "proc-macro2",
  "quote",
  "syn",
@@ -229,7 +236,7 @@ dependencies = [
 [[package]]
 name = "egg-mode"
 version = "0.15.0"
-source = "git+https://github.com/rrbutani/egg-mode#d13d323de942cf1cad3cfdc30b4792ed8daf5ba0"
+source = "git+https://github.com/rrbutani/egg-mode#a81df1dd31b94704a49ea54b96c675efa2432017"
 dependencies = [
  "base64",
  "chrono",
