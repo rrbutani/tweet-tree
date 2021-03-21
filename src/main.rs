@@ -6,10 +6,13 @@ use std::ops::Deref;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use color_eyre::{eyre::WrapErr, Help, Result};
-use egg_mode::tweet;
+use chrono::Utc;
+use color_eyre::{eyre::WrapErr, Help, owo_colors::OwoColorize, Result};
+use egg_mode::{auth, tweet, KeyPair};
+use futures::{StreamExt, TryStreamExt};
 use once_cell::unsync::OnceCell;
 use structopt::StructOpt;
+// use tokio_compat_02::FutureExt;
 
 trait EnvVarOrArg {
     const NAME: &'static str;
@@ -93,34 +96,6 @@ env_var_arg! {
     ),
 }
 
-// impl<A: EnvVarOrArg> Deref for ArgWithEnvVarDefault<>
-
-// #[derive(Clone, Debug, Display, FromStr, PartialEq, Eq)]
-// struct ConsumerKey(String);
-
-// impl Default for ConsumerKey {
-//     fn default() -> Self {
-//         Self(env::var("TWITTER_CONSUMER_KEY")
-//             .wrap_err("Unable to get the Twitter API Consumer Key.")
-//             .suggestion("pass in `--consumer_key` or set `$TWITTER_CONSUMER_KEY`")
-//             .unwrap()
-//         )
-//     }
-// }
-
-// #[derive(Clone, Debug, Display, FromStr, PartialEq, Eq)]
-// struct ConsumerSecret(String);
-
-// impl Default for ConsumerSecret {
-//     fn default() -> Self {
-//         Self(env::var("TWITTER_CONSUMER_SECRET")
-//             .wrap_err("Unable to get the Twitter API Consumer Secret.")
-//             .suggestion("pass in `--consumer_secret` or set `$TWITTER_CONSUMER_SECRET`")
-//             .unwrap()
-//         )
-//     }
-// }
-
 #[derive(Debug, StructOpt)]
 struct Args {
     /// The root of the twitter thread to crawl.
@@ -144,13 +119,56 @@ struct Args {
 }
 
 
+// async fn main() -> Result<()> {
+
+//     real_main(Args::from_args()).compat().await
+// }
+
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
     let args = Args::from_args();
 
-    println!("{}", *args.consumer_key);
-    println!("{}", *args.consumer_secret);
+    let token = KeyPair::new(
+        (*args.consumer_key).clone(),
+        (*args.consumer_secret).clone(),
+    );
+    let token = auth::bearer_token(&token)
+        .await
+        .wrap_err("Unable to authenticate!")
+        .suggestion("check your consumer key/consumer secret?")?;
+
+    let root = tweet::show(args.root_tweet_id, &token)
+        .await
+        .wrap_err_with(|| format!("Failed to find the specified root tweet (`{}`)", args.root_tweet_id))?;
+
+    if Utc::now().signed_duration_since(root.created_at).num_days() >= 7 {
+        eprintln!(
+            "{}: The given root tweet is {}!\n\n\
+            The Twitter Recent Search API will not find tweets that are over \
+            seven days old.\n\
+            The Full-archive Search API will but that API is currently limited \
+            to Academic Research users only.\n\n\
+            See this page for more details: {}.",
+            "WARNING".yellow().bold(),
+            "over 7 days old".bold().italic(),
+            "https://developer.twitter.com/en/docs/twitter-api/tweets/search/introduction".underline().italic(),
+        );
+    }
+
+    // raw::request_as_cursor_iter(
+    //     "https://api.twitter.com/2/tweets/search/recent",
+    //     &token,
+    //     params,
+    //     None, // this is `max_results` not `count` for the search API
+    // )
+
+    let mut children = tweet::all_children_raw(args.root_tweet_id, &token).await;
+    while let Some(t) = children.next().await {
+        println!("{:?}", t.unwrap().text);
+    }
+
+    // println!("{:#?}", root);
 
     Ok(())
 }
