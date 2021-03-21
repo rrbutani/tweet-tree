@@ -2,6 +2,8 @@ use std::convert::{Infallible, TryInto};
 use std::collections::HashMap;
 use std::env;
 use std::fmt::{self, Display};
+use std::fs;
+use std::io::{self, Write};
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::path::PathBuf;
@@ -12,7 +14,7 @@ use color_eyre::{eyre::WrapErr, Help, owo_colors::OwoColorize, Result};
 use egg_mode::{auth, tweet, user, KeyPair, Token};
 use futures::StreamExt;
 use once_cell::unsync::OnceCell;
-use petgraph::graphmap::DiGraphMap;
+use petgraph::{dot::{Config, Dot}, graphmap::DiGraphMap};
 use rand::{Rng, thread_rng};
 use structopt::StructOpt;
 
@@ -157,6 +159,19 @@ impl User {
         eprintln!("{}: {}", "New User".italic().blue(), user);
         Ok(user)
     }
+
+    fn label(&self) -> String {
+        format!("label=\"{} (@{})\"", self.name.replace("\"", "\\\""), self.handle)
+    }
+
+    fn color(&self) -> String {
+        let (r, g, b) = self.color;
+        format!("style=\"filled\" fillcolor=\"#{:02X}{:02X}{:02X}55\"", r, g, b)
+    }
+
+    fn url(&self, tweet: u64) -> String {
+        format!("URL=\"https://twitter.com/{}/status/{}\"", self.handle, tweet)
+    }
 }
 
 #[tokio::main]
@@ -224,7 +239,31 @@ async fn main() -> Result<()> {
         graph.add_edge(prev, t.id, author_id);
     }
 
-    eprintln!("{} tweets found! ({} unique users)", graph.node_count(), users.len());
+    eprintln!("\n{} tweets found! ({} unique users)", graph.node_count(), users.len());
+
+    let mut file;
+    let mut stdout;
+    let out: &mut dyn Write = if let Some(path) = args.output {
+        file = fs::File::create(path)?;
+        &mut file
+    } else {
+        stdout = io::stdout();
+        &mut stdout
+    };
+
+    write!(out, "{}", Dot::with_attr_getters(
+        &graph,
+        &[Config::NodeNoLabel, Config::EdgeNoLabel],
+        &|_g, _e| "".to_string(),
+        &|_g, (tweet, _): (TweetId, _)| {
+            if tweets.get(&tweet).is_none() { return "".to_string() }
+
+            let user = &users[
+                &tweets[&tweet]
+            ].0;
+            format!("shape=box {} {} {}", user.label(), user.color(), user.url(tweet))
+        },
+    ))?;
 
     Ok(())
 }
